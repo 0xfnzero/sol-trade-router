@@ -7,14 +7,10 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
     system_instruction,
-    sysvar::rent::Rent,
-    system_program,
-    sysvar::Sysvar,
+    pubkey,
 };
 
-use spl_token::instruction::transfer;
-
-use crate::processor::ProtocolConfig;
+use crate::state::TradeFeeState;
 
 const PUMPFUN_BUY_SELECTOR: &[u8; 8] = &[102, 6, 61, 18, 1, 218, 235, 234];
 const PUMPFUN_SELL_SELECTOR: &[u8; 8] = &[51, 230, 133, 164, 1, 127, 131, 173];
@@ -58,7 +54,7 @@ fn process_with_fee(
     let accounts_iter = &mut accounts.iter();
     
     // 安全获取账户
-    let config_account = next_account_info(accounts_iter)?;
+    let fee_account = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
     let fee_payer = next_account_info(accounts_iter)?; // 支付手续费的SOL账户
     let fee_receiver = next_account_info(accounts_iter)?; // 接收手续费的SOL账户
@@ -69,10 +65,10 @@ fn process_with_fee(
     }
     
     // 反序列化配置
-    let config = try_from_slice_unchecked::<ProtocolConfig>(&config_account.data.borrow())?;
+    let mut trade_fee_config = TradeFeeState::try_from_slice(&fee_account.data.borrow())?;
     
     // 验证接收方地址匹配配置
-    if fee_receiver.key != &config.protocol_fee_wallet {
+    if fee_receiver.key != &trade_fee_config.fee_wallet {
         return Err(ProgramError::InvalidAccountData);
     }
     
@@ -87,7 +83,7 @@ fn process_with_fee(
     );
     
     // 计算费用
-    let fee = (amount * config.protocol_fee_rate as u64) / 100;
+    let fee = (amount * trade_fee_config.fee_rate as u64) / 100;
     let remaining_amount = amount.checked_sub(fee)
         .ok_or(ProgramError::InsufficientFunds)?;
     

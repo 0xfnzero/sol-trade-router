@@ -3,9 +3,9 @@ use solana_program::{
     entrypoint::ProgramResult, 
     program_error::ProgramError,
     pubkey::Pubkey,
-    // 添加 borsh 反序列化支持
-    borsh::{BorshDeserialize, BorshSerialize},
 };
+
+use borsh::{BorshDeserialize,BorshSerialize};
 
 use crate::instructions::ata::{process_create_associated_token_account, ATA_SELECTOR};
 use crate::instructions::pump::{
@@ -14,6 +14,7 @@ use crate::instructions::pump::{
 };
 use crate::instructions::raydium::{process_raydium_buy, process_raydium_sell, RAYDIUM_BUY_SELECTOR, RAYDIUM_SELL_SELECTOR};
 use crate::instructions::slot::{process_expired_slot, EXPIRED_SLOT_SELECTOR};
+use crate::state::TradeFeeState;
 
 type SelectorHandler = fn(&[AccountInfo], &[u8]) -> ProgramResult;
 
@@ -65,17 +66,10 @@ pub fn process_instruction(
     Err(ProgramError::InvalidInstructionData)
 }
 
-// 配置账户数据结构
-#[derive(Debug, BorshSerialize, BorshDeserialize)]
-pub struct ProtocolConfig {
-    pub protocol_fee_rate: u8,
-    pub protocol_fee_wallet: Pubkey,
-}
-
 // 修复1：添加初始化配置账户函数
 pub fn initialize_config_account(
     accounts: &[AccountInfo],
-    protocol_fee_rate: u8,
+    fee_rate: u8,
 ) -> ProgramResult {
     let config_account = &accounts[0];
     let admin = &accounts[1];
@@ -86,9 +80,9 @@ pub fn initialize_config_account(
     }
     
     // 初始化配置
-    let config = ProtocolConfig {
-        protocol_fee_rate,
-        protocol_fee_wallet: *admin.key,  // 初始化为管理员地址
+    let config = TradeFeeState {
+        fee_rate,
+        fee_wallet: *admin.key,  // 初始化为管理员地址
     };
     
     config.serialize(&mut &mut config_account.data.borrow_mut()[..])?;
@@ -107,7 +101,7 @@ pub fn set_protocol_fee_wallet(
     let new_wallet = Pubkey::new_from_array(<[u8; 32]>::try_from(&instruction_data[..32]).unwrap());
 
     // 账户验证
-    let config_account = &accounts[0];
+    let fee_account = &accounts[0];
     let admin_account = &accounts[1];
     
     // 1. 验证管理员签名
@@ -116,17 +110,18 @@ pub fn set_protocol_fee_wallet(
     }
     
     // 2. 反序列化配置
-    let mut config = ProtocolConfig::try_from_slice(&config_account.data.borrow())?;
+    let mut trade_fee_config = TradeFeeState::try_from_slice(&fee_account.data.borrow())?;
     
     // 3. 验证调用者是当前管理员
-    if *admin_account.key != config.protocol_fee_wallet {
+    if *admin_account.key != trade_fee_config.fee_wallet {
         return Err(ProgramError::IllegalOwner);
     }
     
     // 4. 更新协议费钱包地址
-    config.protocol_fee_wallet = new_wallet;
+    trade_fee_config.fee_wallet = new_wallet;
     
     // 5. 序列化并存储
-    config.serialize(&mut &mut config_account.data.borrow_mut()[..])?;
+    trade_fee_config.serialize(&mut &mut fee_account.data.borrow_mut()[..])?;
+
     Ok(())
 }

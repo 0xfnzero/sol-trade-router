@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 pub mod instructions;
 pub mod processor;
+pub mod state;
 
 entrypoint!(process_instruction);
 
